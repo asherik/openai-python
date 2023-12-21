@@ -1,3 +1,6 @@
+# FIXes by karfly
+- Pydantic object constructions take a lot of time while streaming. This fork disables Pydanctic object construction and just yields raw jsons. Look for `# FIX (karfly)` in code.
+
 # OpenAI Python API library
 
 [![PyPI version](https://img.shields.io/pypi/v/openai.svg)](https://pypi.org/project/openai/)

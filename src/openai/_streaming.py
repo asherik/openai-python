@@ -138,8 +138,9 @@ class AsyncStream(Generic[_T]):
                         request=self.response.request,
                         body=data["error"],
                     )
-
-                yield process_data(data=data, cast_to=cast_to, response=response)
+                # FIX (karfly)
+                yield data
+                # yield process_data(data=data, cast_to=cast_to, response=response)
 
         # Ensure the entire stream is consumed
         async for _sse in iterator:
