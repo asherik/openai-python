@@ -6,7 +6,10 @@ from typing_extensions import Literal, get_args, override, get_type_hints
 
 import pydantic
 
-from ._utils import is_list, is_mapping
+from ._utils import (
+    is_list,
+    is_mapping,
+)
 from ._typing import (
     is_list_type,
     is_union_type,
@@ -80,9 +83,10 @@ def transform(
 
     ```py
     class Params(TypedDict, total=False):
-        card_id: Required[Annotated[str, PropertyInfo(alias='cardID')]]
+        card_id: Required[Annotated[str, PropertyInfo(alias="cardID")]]
 
-    transformed = transform({'card_id': '<my card ID>'}, Params)
+
+    transformed = transform({"card_id": "<my card ID>"}, Params)
     # {'cardID': '<my card ID>'}
     ```
 

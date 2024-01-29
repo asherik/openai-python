@@ -19,19 +19,10 @@ from pydantic import ValidationError
 from openai import OpenAI, AsyncOpenAI, APIResponseValidationError
 from openai._client import OpenAI, AsyncOpenAI
 from openai._models import BaseModel, FinalRequestOptions
+from openai._constants import RAW_RESPONSE_HEADER
 from openai._streaming import Stream, AsyncStream
-from openai._exceptions import (
-    OpenAIError,
-    APIStatusError,
-    APITimeoutError,
-    APIResponseValidationError,
-)
-from openai._base_client import (
-    DEFAULT_TIMEOUT,
-    HTTPX_DEFAULT_TIMEOUT,
-    BaseClient,
-    make_request_options,
-)
+from openai._exceptions import OpenAIError, APIStatusError, APITimeoutError, APIResponseValidationError
+from openai._base_client import DEFAULT_TIMEOUT, HTTPX_DEFAULT_TIMEOUT, BaseClient, make_request_options
 
 from .utils import update_env
 
@@ -208,8 +199,8 @@ class TestOpenAI:
         ITERATIONS = 10
         for _ in range(ITERATIONS):
             build_request(options)
-            gc.collect()
 
+        gc.collect()
         snapshot_after = tracemalloc.take_snapshot()
 
         tracemalloc.stop()
@@ -230,6 +221,7 @@ class TestOpenAI:
                         # to_raw_response_wrapper leaks through the @functools.wraps() decorator.
                         #
                         # removing the decorator fixes the leak for reasons we don't understand.
+                        "openai/_legacy_response.py",
                         "openai/_response.py",
                         # pydantic.BaseModel.model_dump || pydantic.BaseModel.dict leak memory for some reason.
                         "openai/_compat.py",
@@ -622,8 +614,9 @@ class TestOpenAI:
 
         respx_mock.post("/foo").mock(return_value=httpx.Response(200, json={"foo": "bar"}))
 
-        response = self.client.post("/foo", cast_to=Model, stream=True)
-        assert isinstance(response, Stream)
+        stream = self.client.post("/foo", cast_to=Model, stream=True, stream_cls=Stream[Model])
+        assert isinstance(stream, Stream)
+        stream.response.close()
 
     @pytest.mark.respx(base_url=base_url)
     def test_received_text_for_expected_json(self, respx_mock: MockRouter) -> None:
@@ -689,7 +682,7 @@ class TestOpenAI:
                     model="gpt-3.5-turbo",
                 ),
                 cast_to=httpx.Response,
-                options={"headers": {"X-Stainless-Streamed-Raw-Response": "true"}},
+                options={"headers": {RAW_RESPONSE_HEADER: "stream"}},
             )
 
         assert _get_open_connections(self.client) == 0
@@ -712,7 +705,7 @@ class TestOpenAI:
                     model="gpt-3.5-turbo",
                 ),
                 cast_to=httpx.Response,
-                options={"headers": {"X-Stainless-Streamed-Raw-Response": "true"}},
+                options={"headers": {RAW_RESPONSE_HEADER: "stream"}},
             )
 
         assert _get_open_connections(self.client) == 0
@@ -871,8 +864,8 @@ class TestAsyncOpenAI:
         ITERATIONS = 10
         for _ in range(ITERATIONS):
             build_request(options)
-            gc.collect()
 
+        gc.collect()
         snapshot_after = tracemalloc.take_snapshot()
 
         tracemalloc.stop()
@@ -893,6 +886,7 @@ class TestAsyncOpenAI:
                         # to_raw_response_wrapper leaks through the @functools.wraps() decorator.
                         #
                         # removing the decorator fixes the leak for reasons we don't understand.
+                        "openai/_legacy_response.py",
                         "openai/_response.py",
                         # pydantic.BaseModel.model_dump || pydantic.BaseModel.dict leak memory for some reason.
                         "openai/_compat.py",
@@ -1298,8 +1292,9 @@ class TestAsyncOpenAI:
 
         respx_mock.post("/foo").mock(return_value=httpx.Response(200, json={"foo": "bar"}))
 
-        response = await self.client.post("/foo", cast_to=Model, stream=True)
-        assert isinstance(response, AsyncStream)
+        stream = await self.client.post("/foo", cast_to=Model, stream=True, stream_cls=AsyncStream[Model])
+        assert isinstance(stream, AsyncStream)
+        await stream.response.aclose()
 
     @pytest.mark.respx(base_url=base_url)
     @pytest.mark.asyncio
@@ -1367,7 +1362,7 @@ class TestAsyncOpenAI:
                     model="gpt-3.5-turbo",
                 ),
                 cast_to=httpx.Response,
-                options={"headers": {"X-Stainless-Streamed-Raw-Response": "true"}},
+                options={"headers": {RAW_RESPONSE_HEADER: "stream"}},
             )
 
         assert _get_open_connections(self.client) == 0
@@ -1390,7 +1385,7 @@ class TestAsyncOpenAI:
                     model="gpt-3.5-turbo",
                 ),
                 cast_to=httpx.Response,
-                options={"headers": {"X-Stainless-Streamed-Raw-Response": "true"}},
+                options={"headers": {RAW_RESPONSE_HEADER: "stream"}},
             )
 
         assert _get_open_connections(self.client) == 0

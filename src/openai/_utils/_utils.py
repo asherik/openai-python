@@ -21,8 +21,7 @@ from typing_extensions import TypeGuard
 import sniffio
 
 from .._types import Headers, NotGiven, FileTypes, NotGivenOr, HeadersLike
-from .._compat import parse_date as parse_date
-from .._compat import parse_datetime as parse_datetime
+from .._compat import parse_date as parse_date, parse_datetime as parse_datetime
 
 _T = TypeVar("_T")
 _TupleT = TypeVar("_TupleT", bound=Tuple[object, ...])
@@ -211,13 +210,15 @@ def required_args(*variants: Sequence[str]) -> Callable[[CallableT], CallableT]:
     def foo(*, a: str) -> str:
         ...
 
+
     @overload
     def foo(*, b: bool) -> str:
         ...
 
+
     # This enforces the same constraints that a static type checker would
     # i.e. that either a or b must be passed to the function
-    @required_args(['a'], ['b'])
+    @required_args(["a"], ["b"])
     def foo(*, a: str | None = None, b: bool | None = None) -> str:
         ...
     ```
