@@ -1,4 +1,4 @@
-# File generated from our OpenAPI spec by Stainless.
+# File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
 
 from __future__ import annotations
 
@@ -6,10 +6,13 @@ import os
 from typing import Any, cast
 
 import pytest
+import pydantic
 
 from openai import OpenAI, AsyncOpenAI
 from tests.utils import assert_matches_type
-from openai.types.chat import ChatCompletion
+from openai.types.chat import (
+    ChatCompletion,
+)
 
 base_url = os.environ.get("TEST_API_BASE_URL", "http://127.0.0.1:4010")
 
@@ -26,7 +29,7 @@ class TestCompletions:
                     "role": "system",
                 }
             ],
-            model="gpt-3.5-turbo",
+            model="gpt-4o",
         )
         assert_matches_type(ChatCompletion, completion, path=["response"])
 
@@ -40,52 +43,52 @@ class TestCompletions:
                     "name": "string",
                 }
             ],
-            model="gpt-3.5-turbo",
+            model="gpt-4o",
+            audio={
+                "format": "wav",
+                "voice": "alloy",
+            },
             frequency_penalty=-2,
             function_call="none",
             functions=[
                 {
-                    "description": "string",
-                    "name": "string",
+                    "name": "name",
+                    "description": "description",
                     "parameters": {"foo": "bar"},
                 }
             ],
             logit_bias={"foo": 0},
             logprobs=True,
+            max_completion_tokens=0,
             max_tokens=0,
+            metadata={"foo": "string"},
+            modalities=["text"],
             n=1,
+            parallel_tool_calls=True,
+            prediction={
+                "content": "string",
+                "type": "content",
+            },
             presence_penalty=-2,
-            response_format={"type": "json_object"},
-            seed=-9223372036854776000,
+            response_format={"type": "text"},
+            seed=-9007199254740991,
+            service_tier="auto",
             stop="string",
+            store=True,
             stream=False,
+            stream_options={"include_usage": True},
             temperature=1,
             tool_choice="none",
             tools=[
                 {
-                    "type": "function",
                     "function": {
-                        "description": "string",
-                        "name": "string",
+                        "name": "name",
+                        "description": "description",
                         "parameters": {"foo": "bar"},
+                        "strict": True,
                     },
-                },
-                {
                     "type": "function",
-                    "function": {
-                        "description": "string",
-                        "name": "string",
-                        "parameters": {"foo": "bar"},
-                    },
-                },
-                {
-                    "type": "function",
-                    "function": {
-                        "description": "string",
-                        "name": "string",
-                        "parameters": {"foo": "bar"},
-                    },
-                },
+                }
             ],
             top_logprobs=0,
             top_p=1,
@@ -102,7 +105,7 @@ class TestCompletions:
                     "role": "system",
                 }
             ],
-            model="gpt-3.5-turbo",
+            model="gpt-4o",
         )
 
         assert response.is_closed is True
@@ -119,7 +122,7 @@ class TestCompletions:
                     "role": "system",
                 }
             ],
-            model="gpt-3.5-turbo",
+            model="gpt-4o",
         ) as response:
             assert not response.is_closed
             assert response.http_request.headers.get("X-Stainless-Lang") == "python"
@@ -138,7 +141,7 @@ class TestCompletions:
                     "role": "system",
                 }
             ],
-            model="gpt-3.5-turbo",
+            model="gpt-4o",
             stream=True,
         )
         completion_stream.response.close()
@@ -153,52 +156,52 @@ class TestCompletions:
                     "name": "string",
                 }
             ],
-            model="gpt-3.5-turbo",
+            model="gpt-4o",
             stream=True,
+            audio={
+                "format": "wav",
+                "voice": "alloy",
+            },
             frequency_penalty=-2,
             function_call="none",
             functions=[
                 {
-                    "description": "string",
-                    "name": "string",
+                    "name": "name",
+                    "description": "description",
                     "parameters": {"foo": "bar"},
                 }
             ],
             logit_bias={"foo": 0},
             logprobs=True,
+            max_completion_tokens=0,
             max_tokens=0,
+            metadata={"foo": "string"},
+            modalities=["text"],
             n=1,
+            parallel_tool_calls=True,
+            prediction={
+                "content": "string",
+                "type": "content",
+            },
             presence_penalty=-2,
-            response_format={"type": "json_object"},
-            seed=-9223372036854776000,
+            response_format={"type": "text"},
+            seed=-9007199254740991,
+            service_tier="auto",
             stop="string",
+            store=True,
+            stream_options={"include_usage": True},
             temperature=1,
             tool_choice="none",
             tools=[
                 {
-                    "type": "function",
                     "function": {
-                        "description": "string",
-                        "name": "string",
+                        "name": "name",
+                        "description": "description",
                         "parameters": {"foo": "bar"},
+                        "strict": True,
                     },
-                },
-                {
                     "type": "function",
-                    "function": {
-                        "description": "string",
-                        "name": "string",
-                        "parameters": {"foo": "bar"},
-                    },
-                },
-                {
-                    "type": "function",
-                    "function": {
-                        "description": "string",
-                        "name": "string",
-                        "parameters": {"foo": "bar"},
-                    },
-                },
+                }
             ],
             top_logprobs=0,
             top_p=1,
@@ -215,7 +218,7 @@ class TestCompletions:
                     "role": "system",
                 }
             ],
-            model="gpt-3.5-turbo",
+            model="gpt-4o",
             stream=True,
         )
 
@@ -232,7 +235,7 @@ class TestCompletions:
                     "role": "system",
                 }
             ],
-            model="gpt-3.5-turbo",
+            model="gpt-4o",
             stream=True,
         ) as response:
             assert not response.is_closed
@@ -242,6 +245,23 @@ class TestCompletions:
             stream.close()
 
         assert cast(Any, response.is_closed) is True
+
+    @parametrize
+    def test_method_create_disallows_pydantic(self, client: OpenAI) -> None:
+        class MyModel(pydantic.BaseModel):
+            a: str
+
+        with pytest.raises(TypeError, match=r"You tried to pass a `BaseModel` class"):
+            client.chat.completions.create(
+                messages=[
+                    {
+                        "content": "string",
+                        "role": "system",
+                    }
+                ],
+                model="gpt-4o",
+                response_format=cast(Any, MyModel),
+            )
 
 
 class TestAsyncCompletions:
@@ -256,7 +276,7 @@ class TestAsyncCompletions:
                     "role": "system",
                 }
             ],
-            model="gpt-3.5-turbo",
+            model="gpt-4o",
         )
         assert_matches_type(ChatCompletion, completion, path=["response"])
 
@@ -270,52 +290,52 @@ class TestAsyncCompletions:
                     "name": "string",
                 }
             ],
-            model="gpt-3.5-turbo",
+            model="gpt-4o",
+            audio={
+                "format": "wav",
+                "voice": "alloy",
+            },
             frequency_penalty=-2,
             function_call="none",
             functions=[
                 {
-                    "description": "string",
-                    "name": "string",
+                    "name": "name",
+                    "description": "description",
                     "parameters": {"foo": "bar"},
                 }
             ],
             logit_bias={"foo": 0},
             logprobs=True,
+            max_completion_tokens=0,
             max_tokens=0,
+            metadata={"foo": "string"},
+            modalities=["text"],
             n=1,
+            parallel_tool_calls=True,
+            prediction={
+                "content": "string",
+                "type": "content",
+            },
             presence_penalty=-2,
-            response_format={"type": "json_object"},
-            seed=-9223372036854776000,
+            response_format={"type": "text"},
+            seed=-9007199254740991,
+            service_tier="auto",
             stop="string",
+            store=True,
             stream=False,
+            stream_options={"include_usage": True},
             temperature=1,
             tool_choice="none",
             tools=[
                 {
-                    "type": "function",
                     "function": {
-                        "description": "string",
-                        "name": "string",
+                        "name": "name",
+                        "description": "description",
                         "parameters": {"foo": "bar"},
+                        "strict": True,
                     },
-                },
-                {
                     "type": "function",
-                    "function": {
-                        "description": "string",
-                        "name": "string",
-                        "parameters": {"foo": "bar"},
-                    },
-                },
-                {
-                    "type": "function",
-                    "function": {
-                        "description": "string",
-                        "name": "string",
-                        "parameters": {"foo": "bar"},
-                    },
-                },
+                }
             ],
             top_logprobs=0,
             top_p=1,
@@ -332,7 +352,7 @@ class TestAsyncCompletions:
                     "role": "system",
                 }
             ],
-            model="gpt-3.5-turbo",
+            model="gpt-4o",
         )
 
         assert response.is_closed is True
@@ -349,7 +369,7 @@ class TestAsyncCompletions:
                     "role": "system",
                 }
             ],
-            model="gpt-3.5-turbo",
+            model="gpt-4o",
         ) as response:
             assert not response.is_closed
             assert response.http_request.headers.get("X-Stainless-Lang") == "python"
@@ -368,7 +388,7 @@ class TestAsyncCompletions:
                     "role": "system",
                 }
             ],
-            model="gpt-3.5-turbo",
+            model="gpt-4o",
             stream=True,
         )
         await completion_stream.response.aclose()
@@ -383,52 +403,52 @@ class TestAsyncCompletions:
                     "name": "string",
                 }
             ],
-            model="gpt-3.5-turbo",
+            model="gpt-4o",
             stream=True,
+            audio={
+                "format": "wav",
+                "voice": "alloy",
+            },
             frequency_penalty=-2,
             function_call="none",
             functions=[
                 {
-                    "description": "string",
-                    "name": "string",
+                    "name": "name",
+                    "description": "description",
                     "parameters": {"foo": "bar"},
                 }
             ],
             logit_bias={"foo": 0},
             logprobs=True,
+            max_completion_tokens=0,
             max_tokens=0,
+            metadata={"foo": "string"},
+            modalities=["text"],
             n=1,
+            parallel_tool_calls=True,
+            prediction={
+                "content": "string",
+                "type": "content",
+            },
             presence_penalty=-2,
-            response_format={"type": "json_object"},
-            seed=-9223372036854776000,
+            response_format={"type": "text"},
+            seed=-9007199254740991,
+            service_tier="auto",
             stop="string",
+            store=True,
+            stream_options={"include_usage": True},
             temperature=1,
             tool_choice="none",
             tools=[
                 {
-                    "type": "function",
                     "function": {
-                        "description": "string",
-                        "name": "string",
+                        "name": "name",
+                        "description": "description",
                         "parameters": {"foo": "bar"},
+                        "strict": True,
                     },
-                },
-                {
                     "type": "function",
-                    "function": {
-                        "description": "string",
-                        "name": "string",
-                        "parameters": {"foo": "bar"},
-                    },
-                },
-                {
-                    "type": "function",
-                    "function": {
-                        "description": "string",
-                        "name": "string",
-                        "parameters": {"foo": "bar"},
-                    },
-                },
+                }
             ],
             top_logprobs=0,
             top_p=1,
@@ -445,7 +465,7 @@ class TestAsyncCompletions:
                     "role": "system",
                 }
             ],
-            model="gpt-3.5-turbo",
+            model="gpt-4o",
             stream=True,
         )
 
@@ -462,7 +482,7 @@ class TestAsyncCompletions:
                     "role": "system",
                 }
             ],
-            model="gpt-3.5-turbo",
+            model="gpt-4o",
             stream=True,
         ) as response:
             assert not response.is_closed
@@ -472,3 +492,20 @@ class TestAsyncCompletions:
             await stream.close()
 
         assert cast(Any, response.is_closed) is True
+
+    @parametrize
+    async def test_method_create_disallows_pydantic(self, async_client: AsyncOpenAI) -> None:
+        class MyModel(pydantic.BaseModel):
+            a: str
+
+        with pytest.raises(TypeError, match=r"You tried to pass a `BaseModel` class"):
+            await async_client.chat.completions.create(
+                messages=[
+                    {
+                        "content": "string",
+                        "role": "system",
+                    }
+                ],
+                model="gpt-4o",
+                response_format=cast(Any, MyModel),
+            )

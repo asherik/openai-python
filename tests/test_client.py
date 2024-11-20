@@ -1,15 +1,19 @@
-# File generated from our OpenAPI spec by Stainless.
+# File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
 
 from __future__ import annotations
 
 import gc
 import os
+import sys
 import json
 import asyncio
 import inspect
+import subprocess
 import tracemalloc
 from typing import Any, Union, cast
+from textwrap import dedent
 from unittest import mock
+from typing_extensions import Literal
 
 import httpx
 import pytest
@@ -17,7 +21,7 @@ from respx import MockRouter
 from pydantic import ValidationError
 
 from openai import OpenAI, AsyncOpenAI, APIResponseValidationError
-from openai._client import OpenAI, AsyncOpenAI
+from openai._types import Omit
 from openai._models import BaseModel, FinalRequestOptions
 from openai._constants import RAW_RESPONSE_HEADER
 from openai._streaming import Stream, AsyncStream
@@ -292,6 +296,16 @@ class TestOpenAI:
             timeout = httpx.Timeout(**request.extensions["timeout"])  # type: ignore
             assert timeout == DEFAULT_TIMEOUT  # our default
 
+    async def test_invalid_http_client(self) -> None:
+        with pytest.raises(TypeError, match="Invalid `http_client` arg"):
+            async with httpx.AsyncClient() as http_client:
+                OpenAI(
+                    base_url=base_url,
+                    api_key=api_key,
+                    _strict_response_validation=True,
+                    http_client=cast(Any, http_client),
+                )
+
     def test_default_headers_option(self) -> None:
         client = OpenAI(
             base_url=base_url, api_key=api_key, _strict_response_validation=True, default_headers={"X-Foo": "bar"}
@@ -319,7 +333,8 @@ class TestOpenAI:
         assert request.headers.get("Authorization") == f"Bearer {api_key}"
 
         with pytest.raises(OpenAIError):
-            client2 = OpenAI(base_url=base_url, api_key=None, _strict_response_validation=True)
+            with update_env(**{"OPENAI_API_KEY": Omit()}):
+                client2 = OpenAI(base_url=base_url, api_key=None, _strict_response_validation=True)
             _ = client2
 
     def test_default_query_option(self) -> None:
@@ -436,6 +451,35 @@ class TestOpenAI:
         )
         params = dict(request.url.params)
         assert params == {"foo": "2"}
+
+    def test_multipart_repeating_array(self, client: OpenAI) -> None:
+        request = client._build_request(
+            FinalRequestOptions.construct(
+                method="get",
+                url="/foo",
+                headers={"Content-Type": "multipart/form-data; boundary=6b7ba517decee4a450543ea6ae821c82"},
+                json_data={"array": ["foo", "bar"]},
+                files=[("foo.txt", b"hello world")],
+            )
+        )
+
+        assert request.read().split(b"\r\n") == [
+            b"--6b7ba517decee4a450543ea6ae821c82",
+            b'Content-Disposition: form-data; name="array[]"',
+            b"",
+            b"foo",
+            b"--6b7ba517decee4a450543ea6ae821c82",
+            b'Content-Disposition: form-data; name="array[]"',
+            b"",
+            b"bar",
+            b"--6b7ba517decee4a450543ea6ae821c82",
+            b'Content-Disposition: form-data; name="foo.txt"; filename="upload"',
+            b"Content-Type: application/octet-stream",
+            b"",
+            b"hello world",
+            b"--6b7ba517decee4a450543ea6ae821c82--",
+            b"",
+        ]
 
     @pytest.mark.respx(base_url=base_url)
     def test_basic_union_response(self, respx_mock: MockRouter) -> None:
@@ -607,6 +651,10 @@ class TestOpenAI:
 
         assert isinstance(exc.value.__cause__, ValidationError)
 
+    def test_client_max_retries_validation(self) -> None:
+        with pytest.raises(TypeError, match=r"max_retries cannot be None"):
+            OpenAI(base_url=base_url, api_key=api_key, _strict_response_validation=True, max_retries=cast(Any, None))
+
     @pytest.mark.respx(base_url=base_url)
     def test_default_stream_cls(self, respx_mock: MockRouter) -> None:
         class Model(BaseModel):
@@ -653,6 +701,7 @@ class TestOpenAI:
             [3, "", 0.5],
             [2, "", 0.5 * 2.0],
             [1, "", 0.5 * 4.0],
+            [-1100, "", 8],  # test large number potentially overflowing
         ],
     )
     @mock.patch("time.time", mock.MagicMock(return_value=1696004797))
@@ -672,14 +721,17 @@ class TestOpenAI:
         with pytest.raises(APITimeoutError):
             self.client.post(
                 "/chat/completions",
-                body=dict(
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": "Say this is a test",
-                        }
-                    ],
-                    model="gpt-3.5-turbo",
+                body=cast(
+                    object,
+                    dict(
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": "Say this is a test",
+                            }
+                        ],
+                        model="gpt-4o",
+                    ),
                 ),
                 cast_to=httpx.Response,
                 options={"headers": {RAW_RESPONSE_HEADER: "stream"}},
@@ -695,20 +747,157 @@ class TestOpenAI:
         with pytest.raises(APIStatusError):
             self.client.post(
                 "/chat/completions",
-                body=dict(
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": "Say this is a test",
-                        }
-                    ],
-                    model="gpt-3.5-turbo",
+                body=cast(
+                    object,
+                    dict(
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": "Say this is a test",
+                            }
+                        ],
+                        model="gpt-4o",
+                    ),
                 ),
                 cast_to=httpx.Response,
                 options={"headers": {RAW_RESPONSE_HEADER: "stream"}},
             )
 
         assert _get_open_connections(self.client) == 0
+
+    @pytest.mark.parametrize("failures_before_success", [0, 2, 4])
+    @mock.patch("openai._base_client.BaseClient._calculate_retry_timeout", _low_retry_timeout)
+    @pytest.mark.respx(base_url=base_url)
+    @pytest.mark.parametrize("failure_mode", ["status", "exception"])
+    def test_retries_taken(
+        self,
+        client: OpenAI,
+        failures_before_success: int,
+        failure_mode: Literal["status", "exception"],
+        respx_mock: MockRouter,
+    ) -> None:
+        client = client.with_options(max_retries=4)
+
+        nb_retries = 0
+
+        def retry_handler(_request: httpx.Request) -> httpx.Response:
+            nonlocal nb_retries
+            if nb_retries < failures_before_success:
+                nb_retries += 1
+                if failure_mode == "exception":
+                    raise RuntimeError("oops")
+                return httpx.Response(500)
+            return httpx.Response(200)
+
+        respx_mock.post("/chat/completions").mock(side_effect=retry_handler)
+
+        response = client.chat.completions.with_raw_response.create(
+            messages=[
+                {
+                    "content": "string",
+                    "role": "system",
+                }
+            ],
+            model="gpt-4o",
+        )
+
+        assert response.retries_taken == failures_before_success
+        assert int(response.http_request.headers.get("x-stainless-retry-count")) == failures_before_success
+
+    @pytest.mark.parametrize("failures_before_success", [0, 2, 4])
+    @mock.patch("openai._base_client.BaseClient._calculate_retry_timeout", _low_retry_timeout)
+    @pytest.mark.respx(base_url=base_url)
+    def test_omit_retry_count_header(
+        self, client: OpenAI, failures_before_success: int, respx_mock: MockRouter
+    ) -> None:
+        client = client.with_options(max_retries=4)
+
+        nb_retries = 0
+
+        def retry_handler(_request: httpx.Request) -> httpx.Response:
+            nonlocal nb_retries
+            if nb_retries < failures_before_success:
+                nb_retries += 1
+                return httpx.Response(500)
+            return httpx.Response(200)
+
+        respx_mock.post("/chat/completions").mock(side_effect=retry_handler)
+
+        response = client.chat.completions.with_raw_response.create(
+            messages=[
+                {
+                    "content": "string",
+                    "role": "system",
+                }
+            ],
+            model="gpt-4o",
+            extra_headers={"x-stainless-retry-count": Omit()},
+        )
+
+        assert len(response.http_request.headers.get_list("x-stainless-retry-count")) == 0
+
+    @pytest.mark.parametrize("failures_before_success", [0, 2, 4])
+    @mock.patch("openai._base_client.BaseClient._calculate_retry_timeout", _low_retry_timeout)
+    @pytest.mark.respx(base_url=base_url)
+    def test_overwrite_retry_count_header(
+        self, client: OpenAI, failures_before_success: int, respx_mock: MockRouter
+    ) -> None:
+        client = client.with_options(max_retries=4)
+
+        nb_retries = 0
+
+        def retry_handler(_request: httpx.Request) -> httpx.Response:
+            nonlocal nb_retries
+            if nb_retries < failures_before_success:
+                nb_retries += 1
+                return httpx.Response(500)
+            return httpx.Response(200)
+
+        respx_mock.post("/chat/completions").mock(side_effect=retry_handler)
+
+        response = client.chat.completions.with_raw_response.create(
+            messages=[
+                {
+                    "content": "string",
+                    "role": "system",
+                }
+            ],
+            model="gpt-4o",
+            extra_headers={"x-stainless-retry-count": "42"},
+        )
+
+        assert response.http_request.headers.get("x-stainless-retry-count") == "42"
+
+    @pytest.mark.parametrize("failures_before_success", [0, 2, 4])
+    @mock.patch("openai._base_client.BaseClient._calculate_retry_timeout", _low_retry_timeout)
+    @pytest.mark.respx(base_url=base_url)
+    def test_retries_taken_new_response_class(
+        self, client: OpenAI, failures_before_success: int, respx_mock: MockRouter
+    ) -> None:
+        client = client.with_options(max_retries=4)
+
+        nb_retries = 0
+
+        def retry_handler(_request: httpx.Request) -> httpx.Response:
+            nonlocal nb_retries
+            if nb_retries < failures_before_success:
+                nb_retries += 1
+                return httpx.Response(500)
+            return httpx.Response(200)
+
+        respx_mock.post("/chat/completions").mock(side_effect=retry_handler)
+
+        with client.chat.completions.with_streaming_response.create(
+            messages=[
+                {
+                    "content": "string",
+                    "role": "system",
+                }
+            ],
+            model="gpt-4o",
+        ) as response:
+            assert response.retries_taken == failures_before_success
+            assert int(response.http_request.headers.get("x-stainless-retry-count")) == failures_before_success
 
 
 class TestAsyncOpenAI:
@@ -959,6 +1148,16 @@ class TestAsyncOpenAI:
             timeout = httpx.Timeout(**request.extensions["timeout"])  # type: ignore
             assert timeout == DEFAULT_TIMEOUT  # our default
 
+    def test_invalid_http_client(self) -> None:
+        with pytest.raises(TypeError, match="Invalid `http_client` arg"):
+            with httpx.Client() as http_client:
+                AsyncOpenAI(
+                    base_url=base_url,
+                    api_key=api_key,
+                    _strict_response_validation=True,
+                    http_client=cast(Any, http_client),
+                )
+
     def test_default_headers_option(self) -> None:
         client = AsyncOpenAI(
             base_url=base_url, api_key=api_key, _strict_response_validation=True, default_headers={"X-Foo": "bar"}
@@ -986,7 +1185,8 @@ class TestAsyncOpenAI:
         assert request.headers.get("Authorization") == f"Bearer {api_key}"
 
         with pytest.raises(OpenAIError):
-            client2 = AsyncOpenAI(base_url=base_url, api_key=None, _strict_response_validation=True)
+            with update_env(**{"OPENAI_API_KEY": Omit()}):
+                client2 = AsyncOpenAI(base_url=base_url, api_key=None, _strict_response_validation=True)
             _ = client2
 
     def test_default_query_option(self) -> None:
@@ -1103,6 +1303,35 @@ class TestAsyncOpenAI:
         )
         params = dict(request.url.params)
         assert params == {"foo": "2"}
+
+    def test_multipart_repeating_array(self, async_client: AsyncOpenAI) -> None:
+        request = async_client._build_request(
+            FinalRequestOptions.construct(
+                method="get",
+                url="/foo",
+                headers={"Content-Type": "multipart/form-data; boundary=6b7ba517decee4a450543ea6ae821c82"},
+                json_data={"array": ["foo", "bar"]},
+                files=[("foo.txt", b"hello world")],
+            )
+        )
+
+        assert request.read().split(b"\r\n") == [
+            b"--6b7ba517decee4a450543ea6ae821c82",
+            b'Content-Disposition: form-data; name="array[]"',
+            b"",
+            b"foo",
+            b"--6b7ba517decee4a450543ea6ae821c82",
+            b'Content-Disposition: form-data; name="array[]"',
+            b"",
+            b"bar",
+            b"--6b7ba517decee4a450543ea6ae821c82",
+            b'Content-Disposition: form-data; name="foo.txt"; filename="upload"',
+            b"Content-Type: application/octet-stream",
+            b"",
+            b"hello world",
+            b"--6b7ba517decee4a450543ea6ae821c82--",
+            b"",
+        ]
 
     @pytest.mark.respx(base_url=base_url)
     async def test_basic_union_response(self, respx_mock: MockRouter) -> None:
@@ -1284,6 +1513,12 @@ class TestAsyncOpenAI:
 
         assert isinstance(exc.value.__cause__, ValidationError)
 
+    async def test_client_max_retries_validation(self) -> None:
+        with pytest.raises(TypeError, match=r"max_retries cannot be None"):
+            AsyncOpenAI(
+                base_url=base_url, api_key=api_key, _strict_response_validation=True, max_retries=cast(Any, None)
+            )
+
     @pytest.mark.respx(base_url=base_url)
     @pytest.mark.asyncio
     async def test_default_stream_cls(self, respx_mock: MockRouter) -> None:
@@ -1332,6 +1567,7 @@ class TestAsyncOpenAI:
             [3, "", 0.5],
             [2, "", 0.5 * 2.0],
             [1, "", 0.5 * 4.0],
+            [-1100, "", 8],  # test large number potentially overflowing
         ],
     )
     @mock.patch("time.time", mock.MagicMock(return_value=1696004797))
@@ -1352,14 +1588,17 @@ class TestAsyncOpenAI:
         with pytest.raises(APITimeoutError):
             await self.client.post(
                 "/chat/completions",
-                body=dict(
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": "Say this is a test",
-                        }
-                    ],
-                    model="gpt-3.5-turbo",
+                body=cast(
+                    object,
+                    dict(
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": "Say this is a test",
+                            }
+                        ],
+                        model="gpt-4o",
+                    ),
                 ),
                 cast_to=httpx.Response,
                 options={"headers": {RAW_RESPONSE_HEADER: "stream"}},
@@ -1375,17 +1614,193 @@ class TestAsyncOpenAI:
         with pytest.raises(APIStatusError):
             await self.client.post(
                 "/chat/completions",
-                body=dict(
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": "Say this is a test",
-                        }
-                    ],
-                    model="gpt-3.5-turbo",
+                body=cast(
+                    object,
+                    dict(
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": "Say this is a test",
+                            }
+                        ],
+                        model="gpt-4o",
+                    ),
                 ),
                 cast_to=httpx.Response,
                 options={"headers": {RAW_RESPONSE_HEADER: "stream"}},
             )
 
         assert _get_open_connections(self.client) == 0
+
+    @pytest.mark.parametrize("failures_before_success", [0, 2, 4])
+    @mock.patch("openai._base_client.BaseClient._calculate_retry_timeout", _low_retry_timeout)
+    @pytest.mark.respx(base_url=base_url)
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("failure_mode", ["status", "exception"])
+    async def test_retries_taken(
+        self,
+        async_client: AsyncOpenAI,
+        failures_before_success: int,
+        failure_mode: Literal["status", "exception"],
+        respx_mock: MockRouter,
+    ) -> None:
+        client = async_client.with_options(max_retries=4)
+
+        nb_retries = 0
+
+        def retry_handler(_request: httpx.Request) -> httpx.Response:
+            nonlocal nb_retries
+            if nb_retries < failures_before_success:
+                nb_retries += 1
+                if failure_mode == "exception":
+                    raise RuntimeError("oops")
+                return httpx.Response(500)
+            return httpx.Response(200)
+
+        respx_mock.post("/chat/completions").mock(side_effect=retry_handler)
+
+        response = await client.chat.completions.with_raw_response.create(
+            messages=[
+                {
+                    "content": "string",
+                    "role": "system",
+                }
+            ],
+            model="gpt-4o",
+        )
+
+        assert response.retries_taken == failures_before_success
+        assert int(response.http_request.headers.get("x-stainless-retry-count")) == failures_before_success
+
+    @pytest.mark.parametrize("failures_before_success", [0, 2, 4])
+    @mock.patch("openai._base_client.BaseClient._calculate_retry_timeout", _low_retry_timeout)
+    @pytest.mark.respx(base_url=base_url)
+    @pytest.mark.asyncio
+    async def test_omit_retry_count_header(
+        self, async_client: AsyncOpenAI, failures_before_success: int, respx_mock: MockRouter
+    ) -> None:
+        client = async_client.with_options(max_retries=4)
+
+        nb_retries = 0
+
+        def retry_handler(_request: httpx.Request) -> httpx.Response:
+            nonlocal nb_retries
+            if nb_retries < failures_before_success:
+                nb_retries += 1
+                return httpx.Response(500)
+            return httpx.Response(200)
+
+        respx_mock.post("/chat/completions").mock(side_effect=retry_handler)
+
+        response = await client.chat.completions.with_raw_response.create(
+            messages=[
+                {
+                    "content": "string",
+                    "role": "system",
+                }
+            ],
+            model="gpt-4o",
+            extra_headers={"x-stainless-retry-count": Omit()},
+        )
+
+        assert len(response.http_request.headers.get_list("x-stainless-retry-count")) == 0
+
+    @pytest.mark.parametrize("failures_before_success", [0, 2, 4])
+    @mock.patch("openai._base_client.BaseClient._calculate_retry_timeout", _low_retry_timeout)
+    @pytest.mark.respx(base_url=base_url)
+    @pytest.mark.asyncio
+    async def test_overwrite_retry_count_header(
+        self, async_client: AsyncOpenAI, failures_before_success: int, respx_mock: MockRouter
+    ) -> None:
+        client = async_client.with_options(max_retries=4)
+
+        nb_retries = 0
+
+        def retry_handler(_request: httpx.Request) -> httpx.Response:
+            nonlocal nb_retries
+            if nb_retries < failures_before_success:
+                nb_retries += 1
+                return httpx.Response(500)
+            return httpx.Response(200)
+
+        respx_mock.post("/chat/completions").mock(side_effect=retry_handler)
+
+        response = await client.chat.completions.with_raw_response.create(
+            messages=[
+                {
+                    "content": "string",
+                    "role": "system",
+                }
+            ],
+            model="gpt-4o",
+            extra_headers={"x-stainless-retry-count": "42"},
+        )
+
+        assert response.http_request.headers.get("x-stainless-retry-count") == "42"
+
+    @pytest.mark.parametrize("failures_before_success", [0, 2, 4])
+    @mock.patch("openai._base_client.BaseClient._calculate_retry_timeout", _low_retry_timeout)
+    @pytest.mark.respx(base_url=base_url)
+    @pytest.mark.asyncio
+    async def test_retries_taken_new_response_class(
+        self, async_client: AsyncOpenAI, failures_before_success: int, respx_mock: MockRouter
+    ) -> None:
+        client = async_client.with_options(max_retries=4)
+
+        nb_retries = 0
+
+        def retry_handler(_request: httpx.Request) -> httpx.Response:
+            nonlocal nb_retries
+            if nb_retries < failures_before_success:
+                nb_retries += 1
+                return httpx.Response(500)
+            return httpx.Response(200)
+
+        respx_mock.post("/chat/completions").mock(side_effect=retry_handler)
+
+        async with client.chat.completions.with_streaming_response.create(
+            messages=[
+                {
+                    "content": "string",
+                    "role": "system",
+                }
+            ],
+            model="gpt-4o",
+        ) as response:
+            assert response.retries_taken == failures_before_success
+            assert int(response.http_request.headers.get("x-stainless-retry-count")) == failures_before_success
+
+    def test_get_platform(self) -> None:
+        # A previous implementation of asyncify could leave threads unterminated when
+        # used with nest_asyncio.
+        #
+        # Since nest_asyncio.apply() is global and cannot be un-applied, this
+        # test is run in a separate process to avoid affecting other tests.
+        test_code = dedent("""
+        import asyncio
+        import nest_asyncio
+        import threading
+
+        from openai._utils import asyncify
+        from openai._base_client import get_platform 
+
+        async def test_main() -> None:
+            result = await asyncify(get_platform)()
+            print(result)
+            for thread in threading.enumerate():
+                print(thread.name)
+
+        nest_asyncio.apply()
+        asyncio.run(test_main())
+        """)
+        with subprocess.Popen(
+            [sys.executable, "-c", test_code],
+            text=True,
+        ) as process:
+            try:
+                process.wait(2)
+                if process.returncode:
+                    raise AssertionError("calling get_platform using asyncify resulted in a non-zero exit code")
+            except subprocess.TimeoutExpired as e:
+                process.kill()
+                raise AssertionError("calling get_platform using asyncify resulted in a hung process") from e
